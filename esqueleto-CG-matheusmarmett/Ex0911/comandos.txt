@@ -1,7 +1,0 @@
-R -> Movimentação do braço esquerdo
-T -> Movimentação do braço direito
-F -> Movimentação da coxa esquerda
-G -> Movimentação da coxa direita
-SPACE -> Pause e despause da animation completa (todos os membros)
-
-os mesmos comandos também estão detalhados dentro do código.
