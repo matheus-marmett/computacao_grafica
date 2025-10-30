@@ -3,7 +3,7 @@ import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 
 let camera, scene, renderer;
-let objects = {}; // array q armazena todos os .obj
+let objects = {};
 let parametrosGui;
 
 // ======== GUI dinâmico ========
@@ -11,21 +11,20 @@ var createGui = function() {
     const gui = new GUI();
 
     parametrosGui = {
-        escala: 1,          // multiplicador de escala
-        rotacaoY: 0,        // rotação Y
-        opt: 'Origem'       // animal selecionado
+        escala: 1,
+        rotacaoY: 0,
+        opt: 'Origem'
     };
 
     const folder = gui.addFolder("Controle");
 
-    // Slider de escala
     folder.add(parametrosGui, 'escala', 0.1, 8, 0.01)
         .name("Escala")
         .onChange(function(value) {
             const animalNome = parametrosGui.opt.toLowerCase();
             if (objects[animalNome]) {
                 const obj = objects[animalNome];
-                if (!obj.userData.escalaBase) obj.userData.escalaBase = obj.scale.x; 
+                if (!obj.userData.escalaBase) obj.userData.escalaBase = obj.scale.x;
                 obj.scale.set(
                     obj.userData.escalaBase * value,
                     obj.userData.escalaBase * value,
@@ -34,20 +33,18 @@ var createGui = function() {
             }
         });
 
-    // Slider de rotação Y
     folder.add(parametrosGui, 'rotacaoY', -Math.PI, Math.PI, 0.01)
         .name("Rotação Y")
         .onChange(function(value) {
             const animalNome = parametrosGui.opt.toLowerCase();
             if (objects[animalNome]) {
                 objects[animalNome].rotation.y = value;
-                objects[animalNome].userData.rotacaoY = value; 
+                objects[animalNome].userData.rotacaoY = value;
             }
         });
 
     folder.open();
 
-    // Dropdown de seleção do animal
     const options = ['Origem', 'Lobão', 'Gato', 'Aranha', 'Alien', 'Cavalo', 'T-Rex'];
     gui.add(parametrosGui, 'opt')
         .options(options)
@@ -66,7 +63,7 @@ var createGui = function() {
         });
 };
 
-// ======== Função para carregar OBJ com normalização ========
+// ======== Carregamento de OBJ + texturas ========
 function carregarAnimal(nome, arquivo, pos, escalaBase = 20) {
     const objLoader = new OBJLoader();
 
@@ -75,10 +72,70 @@ function carregarAnimal(nome, arquivo, pos, escalaBase = 20) {
         function(obj) {
             obj.traverse(function(child) {
                 if (child instanceof THREE.Mesh) {
-                    child.material = new THREE.MeshNormalMaterial();
+
+                    // ======== Para animais sem geometria UV (cavalo e lobão) ========
+                    if (!child.geometry.attributes.uv) {
+                        child.geometry.computeBoundingBox();
+                        const box = child.geometry.boundingBox;
+                        const size = new THREE.Vector3();
+                        box.getSize(size);
+                        const uv = new Float32Array(child.geometry.attributes.position.count * 2);
+
+                        for (let i = 0; i < child.geometry.attributes.position.count; i++) {
+                            const x = child.geometry.attributes.position.getX(i);
+                            const y = child.geometry.attributes.position.getY(i);
+                            const z = child.geometry.attributes.position.getZ(i);
+                            uv[i * 2] = (x - box.min.x) / size.x;
+                            uv[i * 2 + 1] = (z - box.min.z) / size.z;
+                        }
+                        child.geometry.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+                    }
+
+                    // ======== Texturas específicas ========
+                    let material;
+                    const texLoader = new THREE.TextureLoader();
+
+                    function criarMaterial(caminho, rough, metal, repeat = 1) {
+                        const textura = texLoader.load(caminho);
+                        textura.wrapS = textura.wrapT = THREE.RepeatWrapping;
+                        textura.repeat.set(repeat, repeat);
+                        textura.anisotropy = 16;
+                        textura.colorSpace = THREE.SRGBColorSpace;
+                        return new THREE.MeshStandardMaterial({
+                            map: textura,
+                            roughness: rough,
+                            metalness: metal
+                        });
+                    }
+
+                    const nomeLower = nome.toLowerCase();
+                    if (nomeLower === 'gato') {
+                        material = criarMaterial('assets/textura1tijolo.jpg', 1.0, 0.0, 2);
+                    } 
+                    else if (nomeLower === 'lobão') {
+                        material = criarMaterial('assets/textura2holografico.jpg', 0.3, 0.9, 3);
+                    } 
+                    else if (nomeLower === 'cavalo') {
+                        material = criarMaterial('assets/textura3tyedie.jpg', 0.7, 0.3, 2);
+                    } 
+                    else if (nomeLower === 'aranha') {
+                        material = criarMaterial('assets/textura4verde.jpg', 0.6, 0.4, 2);
+                    } 
+                    else if (nomeLower === 'alien') {
+                        material = criarMaterial('assets/textura5mato.jpg', 0.8, 0.2, 3);
+                    } 
+                    else if (nomeLower === 't-rex') {
+                        material = criarMaterial('assets/textura6roxo.jpg', 0.5, 0.6, 2);
+                    } 
+                    else {
+                        material = new THREE.MeshStandardMaterial({ color: 0xffffff });
+                    }
+
+                    child.material = material;
                 }
             });
 
+            // ===== Normalização =====
             const box = new THREE.Box3().setFromObject(obj);
             const tamanho = box.getSize(new THREE.Vector3());
             const maiorDimensao = Math.max(tamanho.x, tamanho.y, tamanho.z);
@@ -101,7 +158,7 @@ function carregarAnimal(nome, arquivo, pos, escalaBase = 20) {
     );
 }
 
-// ======== Lista de animais e posições ========
+// ======== Lista de animais ========
 const animais = [
     { nome: "Lobão", arquivo: "Wolf.obj", pos: {x: 90, y: 0, z: 0} },
     { nome: "Gato", arquivo: "cat.obj", pos: {x: 0, y: 0, z: -90} },
@@ -122,16 +179,22 @@ export function init() {
     camera.position.z = 60;
 
     scene = new THREE.Scene();
-    scene.add(new THREE.AmbientLight(0xffffff));
+    scene.background = new THREE.Color(0x111111);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.6));
 
-    renderer = new THREE.WebGLRenderer();
+    const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
+    dirLight.position.set(50, 50, 50);
+    scene.add(dirLight);
+
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.setSize(window.innerWidth, window.innerHeight);
     document.body.appendChild(renderer.domElement);
 
     createGui();
     loadObj();
 
-    renderer.setAnimationLoop(nossaAnimacao);
+    renderer.setAnimationLoop(() => renderer.render(scene, camera));
 
     document.addEventListener('mousemove', makeMove);
     document.addEventListener('mouseup', clickOn);
@@ -140,12 +203,7 @@ export function init() {
     window.addEventListener('resize', onWindowResize);
 }
 
-// ======== Render loop ========
-var nossaAnimacao = function() {
-    renderer.render(scene, camera);
-};
-
-// ======== Movimentação da câmera ========
+// ======== Controle de câmera ========
 let click = false;
 let mousePosition = { x: 0, y: 0 };
 
@@ -153,7 +211,6 @@ function makeMove(e) {
     if (click) {
         let deltaX = mousePosition.x - e.offsetX;
         let deltaY = mousePosition.y - e.offsetY;
-
         let euler = new THREE.Euler(toRadians(deltaY) * 0.1, toRadians(deltaX) * 0.1, 0, "YXZ");
         let quat = new THREE.Quaternion().setFromEuler(euler);
         camera.quaternion.multiplyQuaternions(quat, camera.quaternion);
@@ -161,17 +218,9 @@ function makeMove(e) {
     mousePosition = { x: e.offsetX, y: e.offsetY };
 }
 
-function clickOff() {
-    click = true;
-}
-
-function clickOn() {
-    click = false;
-}
-
-function toRadians(value) {
-    return value * (Math.PI / 180);
-}
+function clickOff() { click = true; }
+function clickOn() { click = false; }
+function toRadians(value) { return value * (Math.PI / 180); }
 
 function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
