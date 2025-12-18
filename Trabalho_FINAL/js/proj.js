@@ -11,8 +11,13 @@ import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
 
 
 let camera, scene, renderer, clock, mixer, controls;
-let dragon = null;
 let loadFinished = false;
+let wolf;
+let wolfMixer;
+const wolfActions = {};
+let wolfActiveAction;
+
+
 
 // ===== SISTEMA DE PERSEGUIÇÃO =====
 let chaseChain = [];
@@ -25,15 +30,6 @@ let animals = {
   rats: []
 };
 
-const loader = new FBXLoader();
-loader.load('assets/animals/rigged-rat.fbx',
-  fbx => {
-    console.log('FBX carregado:', fbx);
-    scene.add(fbx); // apenas adiciona direto pra teste
-  },
-  undefined,
-  err => console.error('Erro no FBX:', err)
-);
 
 
 
@@ -94,6 +90,9 @@ criaChao();
 criaRua();
 createLight(parametrosGui.luz);
 
+
+
+
 carregaAnimal({
   nome: 'Cachorro',
   fbxPath: 'assets/animals/Dobermann.fbx',
@@ -122,7 +121,8 @@ carregaAnimal({
 
 carregaAnimal({
   nome: 'Rato',
-  fbxPath: 'assets/animals/rigged-rat.fbx',
+  fbxPath: 'assets/animals/rat.fbx',
+  texturePath: 'assets/textures/pelo_rato.png',
   scale: 0.015, // ajuste conforme necessário
   positions: [
     new THREE.Vector3(-1.5, -5.8, -15),
@@ -205,7 +205,7 @@ setTimeout(() => {
   }
 
   const rat = {
-    mesh: animals.rats[0],
+    mesh: animals.rats[5],
     speed: 0.8,
     path: trackPath,
     progress: 0
@@ -238,6 +238,9 @@ setTimeout(() => {
   criaSolELua();
   criaBotaoDiaNoite();
   aplicaDiaNoite(false); // começa de DIA
+
+  carregaLobo();
+  animate();
 
   // GUI
   criaGui();
@@ -419,41 +422,68 @@ function createLight(type) {
 function criaGui() {
   const gui = new GUI();
 
-// Escala
-gui.add(parametrosGui, 'escala', 0.005, 0.05, 0.001).name('Escala').onChange(v => {
-  // Aplica em todos os animais
-  Object.values(animals).forEach(animalArray => {
-    animalArray.forEach(animal => {
-      if (animal) animal.scale.setScalar(v);
+  /* ---------- ESCALA ---------- */
+  gui.add(parametrosGui, 'escala', 0.005, 0.05, 0.001)
+    .name('Escala')
+    .onChange(v => {
+      Object.values(animals).forEach(animalArray => {
+        animalArray.forEach(animal => {
+          if (animal) animal.scale.setScalar(v);
+        });
+      });
     });
-  });
-});
 
-// Rotação Y
-gui.add(parametrosGui, 'rotY', -Math.PI, Math.PI, 0.01).name('Rot Y').onChange(v => {
-  // Aplica em todos os animais
-  Object.values(animals).forEach(animalArray => {
-    animalArray.forEach(animal => {
-      if (animal) animal.rotation.y = v;
+  /* ---------- ROTAÇÃO ---------- */
+  gui.add(parametrosGui, 'rotY', -Math.PI, Math.PI, 0.01)
+    .name('Rot Y')
+    .onChange(v => {
+      Object.values(animals).forEach(animalArray => {
+        animalArray.forEach(animal => {
+          if (animal) animal.rotation.y = v;
+        });
+      });
     });
-  });
-});
 
+  /* ---------- LUZ ---------- */
+  gui.add(parametrosGui, 'luz', ['Directional', 'Point'])
+    .name('Tipo Luz')
+    .onChange(v => {
+      createLight(v);
 
-  // Tipo de luz
-  gui.add(parametrosGui, 'luz', ['Directional', 'Point']).name('Tipo Luz').onChange(v => {
-    createLight(v);
+      if (gui.__folders['SpotLight Config']) {
+        gui.removeFolder(gui.__folders['SpotLight Config']);
+      }
 
-    // Remove folder antigo
-    if (gui.__folders['SpotLight Config']) gui.removeFolder(gui.__folders['SpotLight Config']);
+      aplicaDiaNoite(isNight);
+    });
 
-    // Controles para o SpotLight
+  /* ---------- LOBO | ANIMAÇÕES ---------- */
+  const wolfFolder = gui.addFolder('🐺 Lobo');
 
+  const wolfGuiParams = {
+    animacao: ''
+  };
 
-    // mantém o dia/noite correto após trocar o tipo
-    aplicaDiaNoite(isNight);
-  });
+  // ⚠️ As animações só existem DEPOIS do FBX carregar
+  const intervalo = setInterval(() => {
+    const nomes = Object.keys(wolfActions);
+
+    if (nomes.length > 0) {
+      wolfGuiParams.animacao = nomes[0];
+
+      wolfFolder
+        .add(wolfGuiParams, 'animacao', nomes)
+        .name('Animação')
+        .onChange(nome => {
+          trocarAnimacaoLobo(nome);
+        });
+
+      wolfFolder.open();
+      clearInterval(intervalo);
+    }
+  }, 200);
 }
+
 
 function carregaAnimal({ nome, fbxPath, scale, positions, targetArray, texturePath }) {
   const loader = new FBXLoader();
@@ -847,6 +877,141 @@ function adicionaLuzPoste(position) {
 
   return pointLight; // caso queira manipular depois
 }
+
+function carregaLobo() {
+  const loader = new FBXLoader();
+  const texLoader = new THREE.TextureLoader();
+
+  const wolfTextures = {
+  body: texLoader.load('assets/textures/Wolf_Body.jpg'),
+  fur: texLoader.load('assets/textures/Wolf_Fur.jpg'),
+  eyes1: texLoader.load('assets/textures/Wolf_Eyes_1.jpg'),
+  eyes2: texLoader.load('assets/textures/Wolf_Eyes_2.jpg')
+};
+
+
+  loader.load(
+    'assets/animals/Wolf.fbx', // ajuste o path exato
+    obj => {
+        obj.traverse(child => {
+  if (!child.isSkinnedMesh) return;
+
+  child.castShadow = true;
+  child.receiveShadow = true;
+
+  const mat = child.material;
+
+  // GARANTIAS ABSOLUTAS
+  mat.skinning = true;
+  mat.transparent = false;
+  mat.opacity = 1;
+  mat.side = THREE.FrontSide;
+  mat.color.set(0xffffff);
+
+  const name = (mat.name || '').toLowerCase();
+
+  if (name.includes('body')) {
+    mat.map = wolfTextures.body;
+  }
+
+  if (name.includes('fur')) {
+    mat.map = wolfTextures.fur;
+  }
+
+  if (name.includes('eye')) {
+    mat.map = wolfTextures.eyes1;
+  }
+
+  mat.needsUpdate = true;
+});
+
+
+
+
+      /* ---------- TRANSFORM ---------- */
+      obj.scale.setScalar(0.2);        // ajuste fino depois
+      obj.position.set(0, -5.8, 30);   // chão + posição no cenário
+      obj.rotation.y = Math.PI;         // geralmente necessário
+
+      scene.add(obj);
+      wolf = obj;
+
+      /* ---------- ANIMAÇÕES ---------- */
+      wolfMixer = new THREE.AnimationMixer(obj);
+
+      const clips = obj.animations || [];
+      console.log('Animações do lobo:', clips.map(c => c.name));
+
+      clips.forEach(clip => {
+        wolfActions[clip.name] = wolfMixer.clipAction(clip);
+      });
+
+      // animação padrão
+      if (clips.length > 0) {
+        wolfActiveAction = wolfActions[clips[0].name];
+        wolfActiveAction.play();
+      }
+    },
+    xhr => {
+      if (xhr.total) {
+        console.log(
+          `Carregando lobo: ${((xhr.loaded / xhr.total) * 100).toFixed(1)}%`
+        );
+      }
+    },
+    err => {
+      console.error('Erro ao carregar lobo:', err);
+    }
+  );
+}
+
+
+
+
+function carregaAnimacaoLobo(nome, path) {
+  const loader = new FBXLoader();
+
+  loader.load(path, anim => {
+    const clip = anim.animations[0];
+    const action = wolfMixer.clipAction(clip);
+
+    wolfActions[nome] = action;
+
+    // Primeira animação padrão
+    if (!wolfActiveAction) {
+      wolfActiveAction = action;
+      action.play();
+    }
+  });
+}
+
+
+
+function trocarAnimacaoLobo(nome, fade = 0.25) {
+  const nova = wolfActions[nome];
+  if (!nova || nova === wolfActiveAction) return;
+
+  nova.reset().play();
+
+  if (wolfActiveAction) {
+    wolfActiveAction.crossFadeTo(nova, fade, false);
+  }
+
+  wolfActiveAction = nova;
+}
+
+
+
+function animate() {
+  requestAnimationFrame(animate);
+
+  const delta = clock.getDelta();
+  if (wolfMixer) wolfMixer.update(delta);
+
+  renderer.render(scene, camera);
+}
+
+
 
 
 
