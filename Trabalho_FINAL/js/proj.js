@@ -2,10 +2,40 @@ import * as THREE from 'three';
 import { GUI } from 'three/addons/libs/lil-gui.module.min.js';
 import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+import { MTLLoader } from 'three/addons/loaders/MTLLoader.js';
+
+
+
+
 
 let camera, scene, renderer, clock, mixer, controls;
 let dragon = null;
 let loadFinished = false;
+
+// ===== SISTEMA DE PERSEGUIÇÃO =====
+let chaseChain = [];
+let trackPath = [];
+
+
+let animals = {
+  dogs: [],
+  cats: [],
+  rats: []
+};
+
+const loader = new FBXLoader();
+loader.load('assets/animals/rigged-rat.fbx',
+  fbx => {
+    console.log('FBX carregado:', fbx);
+    scene.add(fbx); // apenas adiciona direto pra teste
+  },
+  undefined,
+  err => console.error('Erro no FBX:', err)
+);
+
+
 
 const parametrosGui = {
   escala: 0.01,
@@ -22,7 +52,6 @@ let activeAction = null;
 let idleAction = null;
 
 // movimento
-let moveDirection = 0; // -1 = trás, 0 = parado, 1 = frente
 const speed = 12; // unidades por segundo
 
 // iluminação
@@ -60,8 +89,150 @@ export function init() {
   clock = new THREE.Clock();
 
   // chão e iluminação padrão
-  criaChao();
-  createLight(parametrosGui.luz);
+
+criaChao();
+criaRua();
+createLight(parametrosGui.luz);
+
+carregaAnimal({
+  nome: 'Cachorro',
+  fbxPath: 'assets/animals/Dobermann.fbx',
+  texturePath: 'assets/textures/pelo_cachorro.jpg',
+  scale: 0.02,
+  positions: [
+    new THREE.Vector3(-6, -5.8, -40),
+    new THREE.Vector3(6, -5.8, -55)
+  ],
+  targetArray: animals.dogs
+  
+});
+
+carregaAnimal({
+  nome: 'Gato',
+  fbxPath: 'assets/animals/Persian_Cat.fbx',
+  texturePath: 'assets/textures/pelo_gato.jpg',
+  scale: 0.015,
+  positions: [
+    new THREE.Vector3(-3, -5.8, -25),
+    new THREE.Vector3(3, -5.8, -35)
+  ],
+  targetArray: animals.cats
+});
+
+
+carregaAnimal({
+  nome: 'Rato',
+  fbxPath: 'assets/animals/rigged-rat.fbx',
+  scale: 0.015, // ajuste conforme necessário
+  positions: [
+    new THREE.Vector3(-1.5, -5.8, -15),
+    new THREE.Vector3(1.5, -5.8, -18)
+  ],
+  targetArray: animals.rats
+});
+
+// Exemplo de uso
+carregaCasaFBX({
+  fbxPath: 'assets/scene/building-sample-house-a.fbx',
+  texturePath: 'assets/textures/variation-a.png',
+  scale: 0.5,
+  position: new THREE.Vector3(-100, -5.8, -50)
+});
+
+// Casa à esquerda
+carregaCasaFBX({
+  fbxPath: 'assets/scene/building-sample-house-b.fbx',
+  texturePath: 'assets/textures/variation-b.png',
+  scale: 0.5,
+  position: new THREE.Vector3(-100, -5.8, -180) // ajuste a distância lateral
+});
+
+
+carregaCasaFBX({
+  fbxPath: 'assets/scene/building-sample-house-c.fbx',
+  texturePath: 'assets/textures/variation-a.png',
+  scale: 0.5,
+  position: new THREE.Vector3(100, -5.8, -50),
+  doOutroLado: true
+});
+
+// Frente da casa da esquerda
+carregaPoste({
+  objPath: 'assets/scene/StreetLight.obj',
+  mtlPath: 'assets/scene/StreetLight.mtl',
+  scale: 0.1,
+  position: new THREE.Vector3(-32, -5.8, -30)
+  
+});
+
+adicionaLuzPoste(new THREE.Vector3(-32, -5.8, -30));
+
+
+// Frente da casa central
+carregaPoste({
+  objPath: 'assets/scene/StreetLight.obj',
+  mtlPath: 'assets/scene/StreetLight.mtl',
+  scale: 0.1,
+  position: new THREE.Vector3(-32, -5.8, -250)
+});
+
+adicionaLuzPoste(new THREE.Vector3(-32, -10, -250));
+
+
+// Frente da casa da direita
+carregaPoste({
+  objPath: 'assets/scene/StreetLight.obj',
+  mtlPath: 'assets/scene/StreetLight.mtl',
+  scale: 0.1,
+  position: new THREE.Vector3(32, -5.8, -120)
+});
+
+adicionaLuzPoste(new THREE.Vector3(32, -5.8, -120));
+
+
+
+//criaPista();
+
+// cria agentes após pequeno delay para garantir que os modelos existam
+setTimeout(() => {
+  if (
+    animals.rats.length === 0 ||
+    animals.cats.length === 0 ||
+    animals.dogs.length === 0
+  ) {
+    console.warn('Animais ainda não carregaram');
+    return;
+  }
+
+  const rat = {
+    mesh: animals.rats[0],
+    speed: 0.8,
+    path: trackPath,
+    progress: 0
+  };
+
+  const cat = {
+    mesh: animals.cats[0],
+    speed: 1.0,
+    path: trackPath,
+    progress: -0.6
+  };
+
+  const dog = {
+    mesh: animals.dogs[0],
+    speed: 1.2,
+    path: trackPath,
+    progress: -1.2
+  };
+
+  chaseChain = [rat, cat, dog];
+
+  console.log('🐭🐱🐶 Cadeia de perseguição iniciada');
+}, 800);
+
+
+
+
 
   // ===== Sol/Lua + botão Dia/Noite (NOVO) =====
   criaSolELua();
@@ -70,9 +241,6 @@ export function init() {
 
   // GUI
   criaGui();
-
-  // carregar modelo
-  carregaDragao();
 
   // eventos
   window.addEventListener('resize', onWindowResize);
@@ -86,7 +254,7 @@ export function init() {
 /* ---------- CHÃO ---------- */
 function criaChao() {
   const texLoader = new THREE.TextureLoader();
-  const textura = texLoader.load('assets/grasslight-big.jpg');
+  const textura = texLoader.load('assets/textures/grasslight-big.jpg');
   textura.wrapS = textura.wrapT = THREE.RepeatWrapping;
   textura.repeat.set(25, 25);
   textura.anisotropy = 16;
@@ -98,6 +266,43 @@ function criaChao() {
   ground.receiveShadow = true;
   scene.add(ground);
 }
+
+function criaRua() {
+  const texLoader = new THREE.TextureLoader();
+
+  const texturaAsfalto = texLoader.load('assets/textures/estrada.jpg');
+  texturaAsfalto.wrapS = texturaAsfalto.wrapT = THREE.RepeatWrapping;
+
+  // Quanto maior o comprimento, maior a repetição no eixo Y
+  texturaAsfalto.repeat.set(1, 40);
+  texturaAsfalto.anisotropy = 16;
+
+  const materialRua = new THREE.MeshStandardMaterial({
+    map: texturaAsfalto,
+    roughness: 0.9,
+    metalness: 0.05
+  });
+
+  const largura = 60;
+  const comprimento = 1000;
+
+  const geometriaRua = new THREE.PlaneGeometry(largura, comprimento);
+  const rua = new THREE.Mesh(geometriaRua, materialRua);
+
+  rua.rotation.x = -Math.PI / 2;
+
+  // Levemente acima do chão para evitar z-fighting
+  rua.position.y = -5.85;
+
+  // Centraliza a rua no eixo Z
+  rua.position.z = 0;
+
+  rua.receiveShadow = true;
+
+  scene.add(rua);
+}
+
+
 
 /* ---------- ILUMINAÇÃO ---------- */
 function createLight(type) {
@@ -143,27 +348,45 @@ function createLight(type) {
     dirLight.target = lightTarget;
 
     currentLight = dirLight;
-    ambientLight = new THREE.AmbientLight(0x404040, 0.6);
+    ambientLight = new THREE.AmbientLight(0x404040, 0.3);
     scene.add(currentLight, ambientLight);
 
   } else if (type === 'Point') {
-    const pointLight = new THREE.PointLight(0xffffff, 1.6, 600, 0.6);
-    pointLight.position.set(10, 15, 10);
-    pointLight.castShadow = true;
+    // Coordenadas fixas dos postes
+    const posicoesPostes = [
+      new THREE.Vector3(-32, 33, -30),   // frente casa esquerda
+      new THREE.Vector3(-32, 33, -250),  // frente casa central
+      new THREE.Vector3(32, 33, -120)    // frente casa direita
+    ];
 
-    pointLight.shadow.mapSize.set(1024, 1024);
-    pointLight.shadow.camera.near = 0.5;
-    pointLight.shadow.camera.far = 500;
+    // Array para guardar os PointLights, caso precise manipular depois
+    const pointLights = [];
 
-    // Indicador visual (era "sol" debug)
-    const sphereGeo = new THREE.SphereGeometry(1.5, 16, 8);
-    const sphereMat = new THREE.MeshBasicMaterial({ color: 0xffffaa });
-    pointIndicator = new THREE.Mesh(sphereGeo, sphereMat);
-    pointIndicator.position.copy(pointLight.position);
+    posicoesPostes.forEach(pos => {
+      const pointLight = new THREE.PointLight(0xfff8c0, 6.5, 100, 0.7);
+      pointLight.position.copy(pos);
+      pointLight.castShadow = true;
 
-    currentLight = pointLight;
+      pointLight.shadow.mapSize.set(1024, 1024);
+      pointLight.shadow.camera.near = 0.5;
+      pointLight.shadow.camera.far = 100;
+
+      // Indicador visual da luz
+      const sphereGeo = new THREE.SphereGeometry(1.5, 16, 8);
+      const sphereMat = new THREE.MeshBasicMaterial({ color: 0xfff8c0 });
+      const pointIndicator = new THREE.Mesh(sphereGeo, sphereMat);
+      pointIndicator.position.copy(pos);
+
+      scene.add(pointLight, pointIndicator);
+      pointLights.push(pointLight);
+    });
+
+    // Apenas para referência no sistema de dia/noite
+    currentLight = pointLights[0];
+
+    // Luz ambiente
     ambientLight = new THREE.AmbientLight(0x404040, 0.3);
-    scene.add(currentLight, pointIndicator, ambientLight);
+    scene.add(ambientLight);
 
   } else if (type === 'Spot') {
     const spotLight = new THREE.SpotLight(0xffffff, 1.8, 1000, Math.PI / 6, 0.3, 1);
@@ -187,116 +410,224 @@ function createLight(type) {
     scene.add(currentLight, ambientLight, lightHelper);
   }
 
-  // ===== garante que ao trocar o tipo de luz no GUI, o modo dia/noite continua consistente =====
+  // Atualiza o modo dia/noite
   aplicaDiaNoite(isNight);
 }
+
 
 /* ---------- GUI ---------- */
 function criaGui() {
   const gui = new GUI();
 
-  // Escala
-  gui.add(parametrosGui, 'escala', 0.005, 0.05, 0.001).name('Escala').onChange(v => {
-    if (dragon) dragon.scale.setScalar(v);
+// Escala
+gui.add(parametrosGui, 'escala', 0.005, 0.05, 0.001).name('Escala').onChange(v => {
+  // Aplica em todos os animais
+  Object.values(animals).forEach(animalArray => {
+    animalArray.forEach(animal => {
+      if (animal) animal.scale.setScalar(v);
+    });
   });
+});
 
-  // Rotação Y
-  gui.add(parametrosGui, 'rotY', -Math.PI, Math.PI, 0.01).name('Rot Y').onChange(v => {
-    if (dragon) dragon.rotation.y = v;
+// Rotação Y
+gui.add(parametrosGui, 'rotY', -Math.PI, Math.PI, 0.01).name('Rot Y').onChange(v => {
+  // Aplica em todos os animais
+  Object.values(animals).forEach(animalArray => {
+    animalArray.forEach(animal => {
+      if (animal) animal.rotation.y = v;
+    });
   });
+});
+
 
   // Tipo de luz
-  gui.add(parametrosGui, 'luz', ['Directional', 'Point', 'Spot']).name('Tipo Luz').onChange(v => {
+  gui.add(parametrosGui, 'luz', ['Directional', 'Point']).name('Tipo Luz').onChange(v => {
     createLight(v);
 
     // Remove folder antigo
     if (gui.__folders['SpotLight Config']) gui.removeFolder(gui.__folders['SpotLight Config']);
 
     // Controles para o SpotLight
-    if (v === 'Spot' && currentLight && currentLight.isSpotLight) {
-      const spotFolder = gui.addFolder('SpotLight Config');
-      spotFolder.add(currentLight, 'intensity', 0, 5, 0.1).name('Intensidade');
-      spotFolder.add(currentLight, 'angle', 0.1, Math.PI / 2, 0.01).name('Ângulo').onChange(() => {
-        currentLight.updateMatrixWorld();
-      });
-      spotFolder.add(currentLight, 'penumbra', 0, 1, 0.05).name('Penumbra');
-      spotFolder.add(currentLight.position, 'x', -100, 200, 1).name('Posição X');
-      spotFolder.add(currentLight.position, 'y', 0, 200, 1).name('Posição Y');
-      spotFolder.add(currentLight.position, 'z', -100, 100, 1).name('Posição Z');
-      spotFolder.open();
-    }
+
 
     // mantém o dia/noite correto após trocar o tipo
     aplicaDiaNoite(isNight);
   });
 }
 
-/* ---------- CARREGA DRAGÃO ---------- */
-function carregaDragao() {
+function carregaAnimal({ nome, fbxPath, scale, positions, targetArray, texturePath }) {
   const loader = new FBXLoader();
   const texLoader = new THREE.TextureLoader();
 
+  console.group(`🐭 Carregando ${nome} (FBX)`);
+
   loader.load(
-    'assets/fbx/Dragon3.fbx',
-    obj => {
-      obj.traverse(child => {
+    fbxPath,
+    fbx => {
+      // Carrega textura se fornecida
+      let textura = null;
+      if (texturePath) {
+        textura = texLoader.load(texturePath);
+      }
+
+      fbx.traverse(child => {
         if (child.isMesh) {
-          const tex = texLoader.load('assets/fbx/Dragon_ground_color.jpg');
-          child.material = new THREE.MeshStandardMaterial({ map: tex });
+          child.visible = true;
           child.castShadow = true;
           child.receiveShadow = true;
+
+          // aplica textura, se existir
+          if (textura) {
+            child.material.map = textura;
+            child.material.needsUpdate = true;
+          }
         }
       });
 
-      obj.position.y = -5.8;
-      obj.scale.setScalar(parametrosGui.escala);
-      scene.add(obj);
-      dragon = obj;
+      fbx.scale.setScalar(scale);
 
-      mixer = new THREE.AnimationMixer(obj);
-      const anims = obj.animations || [];
+      positions.forEach((pos, index) => {
+        const clone = fbx.clone(true);
+        clone.position.copy(pos);
+        clone.position.y += 0.1;
+        clone.scale.setScalar(scale);
 
-      if (anims.length > 0) {
-        if (anims[0]) actions.walk = mixer.clipAction(anims[0]);
-        if (anims[1]) actions.fly = mixer.clipAction(anims[1]);
-        if (anims[2]) actions.idle = mixer.clipAction(anims[2]);
-        if (!actions.idle) actions.idle = mixer.clipAction(anims[0]);
+        scene.add(clone);
 
-        if (actions.idle) {
-          actions.idle.play();
-          activeAction = actions.idle;
-          idleAction = actions.idle;
+        const mixer = new THREE.AnimationMixer(clone);
+        clone.userData.mixer = mixer;
+        clone.userData.actions = {};
+
+        if (fbx.animations && fbx.animations.length > 0) {
+          fbx.animations.forEach((clip, i) => {
+            const actionName = clip.name || `anim_${i}`;
+            const action = mixer.clipAction(clip);
+            clone.userData.actions[actionName] = action;
+          });
+          const firstKey = Object.keys(clone.userData.actions)[0];
+          if (firstKey) clone.userData.actions[firstKey].play();
         }
-      }
 
-      loadFinished = true;
-      console.log('Dragão carregado. Animações detectadas:', anims.length);
+        targetArray.push(clone);
+        console.log(`➕ ${nome} #${index + 1} em`, pos.toArray());
+      });
+
+      console.log(`✔ Total de ${nome}s na cena: ${targetArray.length}`);
+      console.groupEnd();
     },
-    progress => {
-      if (progress.total) console.log('Carregando dragão:', ((progress.loaded / progress.total) * 100).toFixed(1), '%');
-    },
-    err => console.error('Erro ao carregar FBX:', err)
+    undefined,
+    err => {
+      console.error(`❌ Erro ao carregar ${nome}:`, err);
+      console.groupEnd();
+    }
   );
 }
 
+
+function carregaCasaFBX({ fbxPath, texturePath, scale, position, doOutroLado = false, onLoad }) {
+  const loader = new FBXLoader();
+  const texLoader = new THREE.TextureLoader();
+
+  loader.load(fbxPath, fbx => {
+    const texture = texLoader.load(texturePath);
+
+    fbx.traverse(child => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+
+        child.material = new THREE.MeshStandardMaterial({
+          map: texture,
+          side: THREE.DoubleSide
+        });
+      }
+    });
+
+    fbx.scale.setScalar(scale);
+    fbx.position.copy(position);
+
+    // aplica rotação baseada no lado da rua
+    fbx.rotation.y = doOutroLado ? -Math.PI / 2 : Math.PI / 2;
+
+    scene.add(fbx);
+    console.log('✔ Casa carregada com textura na cena');
+
+    if (onLoad) onLoad(fbx); // retorna referência do objeto
+  },
+  undefined,
+  err => {
+    console.error('❌ Erro ao carregar casa:', err);
+  });
+}
+
+function carregaPoste({ objPath, mtlPath, scale, position }) {
+  const mtlLoader = new MTLLoader();
+  mtlLoader.load(mtlPath, materials => {
+    materials.preload(); // pré-carrega os materiais
+
+    const objLoader = new OBJLoader();
+    objLoader.setMaterials(materials); // aplica os materiais ao OBJ
+    objLoader.load(objPath, obj => {
+      obj.scale.setScalar(scale);
+      obj.position.copy(position);
+      obj.castShadow = true;
+      obj.receiveShadow = true;
+
+      scene.add(obj);
+      console.log('✔ Poste carregado na cena');
+    },
+    undefined,
+    err => {
+      console.error('❌ Erro ao carregar poste:', err);
+    });
+  });
+}
+
+
+
+
+
 /* ---------- INPUT ---------- */
+let moveDirection = 0; // frente/trás
+let sideDirection = 0; // esquerda/direita
+
+function moveAnimals() {
+  // Percorre todos os animais de todos os tipos
+  Object.values(animals).forEach(animalArray => {
+    animalArray.forEach(animal => {
+      if (!animal) return;
+
+      // Movimento frente/trás (Z)
+      animal.position.z += moveDirection * 0.5;
+
+      // Movimento lateral (X)
+      animal.position.x += sideDirection * 0.5;
+    });
+  });
+}
+
 function onKeyDown(e) {
   const code = e.code || e.key;
-  if (code === 'KeyW' || code === 'ArrowUp') {
-    moveDirection = 1;
-    startMoving();
-  } else if (code === 'KeyS' || code === 'ArrowDown') {
-    moveDirection = -1;
-    startMoving();
-  }
+
+  // Frente/trás
+  if (code === 'KeyW' || code === 'ArrowUp') moveDirection = 1;
+  else if (code === 'KeyS' || code === 'ArrowDown') moveDirection = -1;
+
+  // Lateral
+  if (code === 'KeyA') sideDirection = -1; // esquerda
+  else if (code === 'KeyD') sideDirection = 1; // direita
+
+  moveAnimals();
 }
 
 function onKeyUp(e) {
   const code = e.code || e.key;
-  if (code === 'KeyW' || code === 'ArrowUp' || code === 'KeyS' || code === 'ArrowDown') {
-    moveDirection = 0;
-    stopMoving();
-  }
+
+  // Z: frente/trás
+  if (code === 'KeyW' || code === 'ArrowUp' || code === 'KeyS' || code === 'ArrowDown') moveDirection = 0;
+
+  // X: esquerda/direita
+  if (code === 'KeyA' || code === 'KeyD') sideDirection = 0;
 }
 
 function startMoving() {
@@ -318,6 +649,7 @@ function fadeToAction(toAction, duration) {
   if (from) from.crossFadeTo(toAction, duration, false);
   activeAction = toAction;
 }
+
 
 /* ---------- DIA/NOITE (NOVO) ---------- */
 function criaSolELua() {
@@ -411,22 +743,113 @@ function aplicaDiaNoite(night) {
   if (lightHelper && lightHelper.update) lightHelper.update();
 }
 
+ // ciclo/circuito de movimentação
+function moveAlongPath(agent, delta) {
+  if (!agent.path || agent.path.length < 2) {
+    console.warn('⚠ Caminho inválido para agente:', agent);
+    return;
+  }
+
+  const path = agent.path;
+
+  agent.progress += agent.speed * delta;
+
+  if (agent.progress >= path.length) {
+    agent.progress -= path.length;
+  }
+
+  const index = Math.floor(agent.progress);
+  const nextIndex = (index + 1) % path.length;
+
+  const current = path[index];
+  const next = path[nextIndex];
+
+  if (!current || !next) {
+    console.error('❌ Ponto inválido no caminho', { index, nextIndex, path });
+    return;
+  }
+
+  const t = agent.progress - index;
+  agent.mesh.position.lerpVectors(current, next, t);
+
+  const dir = next.clone().sub(current).normalize();
+  agent.mesh.lookAt(agent.mesh.position.clone().add(dir));
+}
+
+function applyRunMotion(agent, time) {
+  if (!agent.mesh) return;
+
+  // parâmetros por espécie
+  let bounce = 0.1;
+  let sway = 0.04;
+
+  if (agent.mesh === animals.rats[0]) {
+    bounce = 0.14;
+    sway = 0.06;
+  } else if (agent.mesh === animals.cats[0]) {
+    bounce = 0.11;
+    sway = 0.045;
+  } else if (agent.mesh === animals.dogs[0]) {
+    bounce = 0.08;
+    sway = 0.03;
+  }
+
+  // movimento vertical (passadas)
+  agent.mesh.position.y =
+    -5.8 + Math.abs(Math.sin(time * 8)) * bounce;
+
+  // inclinação lateral (peso)
+  agent.mesh.rotation.z =
+    Math.sin(time * 6) * sway;
+}
+
+
+
 /* ---------- LOOP ---------- */
 function loop() {
   const delta = clock.getDelta();
-  if (mixer) mixer.update(delta);
 
-  // mover o dragão
-  if (dragon && moveDirection !== 0) {
-    const moveStep = speed * delta * moveDirection;
-    const forward = new THREE.Vector3(0, 0, -1);
-    forward.applyQuaternion(dragon.quaternion);
-    dragon.position.addScaledVector(forward, moveStep);
-  }
+  // ===== PERSEGUIÇÃO =====
+  chaseChain.forEach(agent => {
+    moveAlongPath(agent, delta);
+  });
+
+  // animações (se existirem futuramente)
+  if (mixer) mixer.update(delta);
 
   controls.update();
   renderer.render(scene, camera);
 }
+
+function adicionaLuzPoste(position) {
+  // Mesmos parâmetros do PointLight do createLight
+  const cor = 0xfff8c0;
+  const intensidade = 6.5;
+  const alcance = 100;
+  const decay = 0.7;
+
+  const pointLight = new THREE.PointLight(cor, intensidade, alcance, decay);
+  pointLight.position.copy(position);
+  pointLight.castShadow = true;
+
+  pointLight.shadow.mapSize.set(1024, 1024);
+  pointLight.shadow.camera.near = 0.5;
+  pointLight.shadow.camera.far = 100;
+
+  // Indicador visual da luz (opcional)
+  const sphereGeo = new THREE.SphereGeometry(1.5, 16, 8);
+  const sphereMat = new THREE.MeshBasicMaterial({ color: cor });
+  const pointIndicator = new THREE.Mesh(sphereGeo, sphereMat);
+  pointIndicator.position.copy(position);
+
+  scene.add(pointLight, pointIndicator);
+  
+
+  return pointLight; // caso queira manipular depois
+}
+
+
+
 
 /* ---------- RESIZE ---------- */
 function onWindowResize() {
@@ -434,3 +857,6 @@ function onWindowResize() {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
+
+
+
