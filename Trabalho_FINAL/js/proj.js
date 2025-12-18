@@ -32,6 +32,11 @@ let lightHelper = null;
 let lightTarget = null;
 let pointIndicator = null;
 
+// ===== DIA/NOITE (NOVO) =====
+let isNight = false;
+let sunMesh = null;
+let moonMesh = null;
+
 export function init() {
   // câmera
   camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 500);
@@ -57,6 +62,11 @@ export function init() {
   // chão e iluminação padrão
   criaChao();
   createLight(parametrosGui.luz);
+
+  // ===== Sol/Lua + botão Dia/Noite (NOVO) =====
+  criaSolELua();
+  criaBotaoDiaNoite();
+  aplicaDiaNoite(false); // começa de DIA
 
   // GUI
   criaGui();
@@ -94,7 +104,6 @@ function createLight(type) {
   // Remove luzes e objetos anteriores
   if (currentLight) {
     scene.remove(currentLight);
-    currentLight.dispose?.();
     currentLight = null;
   }
   if (ambientLight) {
@@ -146,7 +155,7 @@ function createLight(type) {
     pointLight.shadow.camera.near = 0.5;
     pointLight.shadow.camera.far = 500;
 
-    // Indicador visual (sol)
+    // Indicador visual (era "sol" debug)
     const sphereGeo = new THREE.SphereGeometry(1.5, 16, 8);
     const sphereMat = new THREE.MeshBasicMaterial({ color: 0xffffaa });
     pointIndicator = new THREE.Mesh(sphereGeo, sphereMat);
@@ -177,6 +186,9 @@ function createLight(type) {
     ambientLight = new THREE.AmbientLight(0x404040, 0.35);
     scene.add(currentLight, ambientLight, lightHelper);
   }
+
+  // ===== garante que ao trocar o tipo de luz no GUI, o modo dia/noite continua consistente =====
+  aplicaDiaNoite(isNight);
 }
 
 /* ---------- GUI ---------- */
@@ -213,6 +225,9 @@ function criaGui() {
       spotFolder.add(currentLight.position, 'z', -100, 100, 1).name('Posição Z');
       spotFolder.open();
     }
+
+    // mantém o dia/noite correto após trocar o tipo
+    aplicaDiaNoite(isNight);
   });
 }
 
@@ -302,6 +317,98 @@ function fadeToAction(toAction, duration) {
   toAction.reset().play();
   if (from) from.crossFadeTo(toAction, duration, false);
   activeAction = toAction;
+}
+
+/* ---------- DIA/NOITE (NOVO) ---------- */
+function criaSolELua() {
+  // Sol
+  const sunGeo = new THREE.SphereGeometry(3.5, 24, 16);
+  const sunMat = new THREE.MeshBasicMaterial({ color: 0xfff2a0 });
+  sunMesh = new THREE.Mesh(sunGeo, sunMat);
+
+  // Lua
+  const moonGeo = new THREE.SphereGeometry(3.0, 24, 16);
+  const moonMat = new THREE.MeshBasicMaterial({ color: 0xcfd8ff });
+  moonMesh = new THREE.Mesh(moonGeo, moonMat);
+
+  // posições iniciais (dentro do far=500 da câmera)
+  sunMesh.position.set(180, 160, -120);
+  moonMesh.position.set(-180, 140, -140);
+
+  scene.add(sunMesh, moonMesh);
+}
+
+function criaBotaoDiaNoite() {
+  if (document.getElementById('btn-dia-noite')) return;
+
+  const btn = document.createElement('button');
+  btn.id = 'btn-dia-noite';
+  btn.textContent = '🌙 Noite';
+
+  btn.style.position = 'fixed';
+  btn.style.left = '16px';
+  btn.style.bottom = '16px';
+  btn.style.zIndex = '9999';
+  btn.style.padding = '10px 12px';
+  btn.style.borderRadius = '10px';
+  btn.style.border = '1px solid rgba(255,255,255,0.25)';
+  btn.style.background = 'rgba(0,0,0,0.45)';
+  btn.style.color = '#fff';
+  btn.style.cursor = 'pointer';
+  btn.style.fontSize = '14px';
+  btn.style.backdropFilter = 'blur(6px)';
+
+  btn.addEventListener('click', () => {
+    aplicaDiaNoite(!isNight);
+    btn.textContent = isNight ? '☀️ Dia' : '🌙 Noite';
+  });
+
+  document.body.appendChild(btn);
+}
+
+function aplicaDiaNoite(night) {
+  isNight = night;
+
+  // céu
+  scene.background = new THREE.Color(night ? 0x0b1026 : 0xcce0ff);
+
+  // Sol / Lua
+  if (sunMesh) sunMesh.visible = !night;
+  if (moonMesh) moonMesh.visible = night;
+
+  // opcional: esconde o indicador do PointLight pra não ficar “2 sóis”
+  if (pointIndicator) pointIndicator.visible = false;
+
+  // luz ambiente
+  if (ambientLight) {
+    ambientLight.color.setHex(night ? 0x1a1f3a : 0x404040);
+    ambientLight.intensity = night ? 0.18 : 0.6;
+  }
+
+  // luz principal
+  if (currentLight) {
+    if (currentLight.isDirectionalLight) {
+      currentLight.color.setHex(night ? 0x8ab4ff : 0xffffff);
+      currentLight.intensity = night ? 0.35 : 1.2;
+
+      // direção do “sol”/“lua”
+      currentLight.position.set(night ? -120 : 140, night ? 140 : 170, 120);
+
+      // posiciona o sol/lua próximo da direção (visual)
+      if (!night && sunMesh) sunMesh.position.copy(currentLight.position);
+      if (night && moonMesh) moonMesh.position.copy(currentLight.position);
+
+    } else if (currentLight.isPointLight) {
+      currentLight.color.setHex(night ? 0xb0c7ff : 0xffffff);
+      currentLight.intensity = night ? 0.9 : 1.6;
+
+    } else if (currentLight.isSpotLight) {
+      currentLight.color.setHex(night ? 0xb0c7ff : 0xffffff);
+      currentLight.intensity = night ? 0.9 : 1.8;
+    }
+  }
+
+  if (lightHelper && lightHelper.update) lightHelper.update();
 }
 
 /* ---------- LOOP ---------- */
